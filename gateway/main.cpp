@@ -1,27 +1,34 @@
 #include <atomic>
+#include <chrono>
 #include <csignal>
 #include <iostream>
+#include <thread>
 
 #include "gateway.hpp"
 
-std::atomic<bool> running(true);
+std::atomic<bool> g_running(true);
 
-void signal_handler(int) {
-    running = false;
-    std::cout << "\nCtrl+C detected, stopping server...\n";
+void handler(int) {
+    g_running = false;
+    std::cout << "\n[MAIN] Caught signal. Shutting down...\n";
 }
 
 int main() {
-    std::signal(SIGINT, signal_handler);
-    std::signal(SIGTERM, signal_handler);
+    std::signal(SIGINT, handler);
+    std::signal(SIGTERM, handler);
 
-    // Multithreaded Server (Gateway)
-    Gateway server("tcp://*:5555", 4);
+    Gateway gw("tcp://*:6000", 4);
+    gw.start();
 
-    std::cout << "Press Ctrl+C to exit.\n";
+    std::cout << "[MAIN] Gateway running. Ctrl+C to stop.\n";
 
-    // Start in-blocking mode, exits only via proxy break (Ctrl+C)
-    server.start();  // blocking
+    while (g_running) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    }
 
+    std::cout << "[MAIN] Main loop exiting, calling gw.stop()...\n";
+    gw.stop();
+
+    std::cout << "[MAIN] Exit.\n";
     return 0;
 }

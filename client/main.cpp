@@ -17,26 +17,23 @@ int main() {
     std::signal(SIGINT, signal_handler);
     std::signal(SIGTERM, signal_handler);
 
-    const std::string endpoint = "tcp://127.0.0.1:6001";
+    const std::string gatewayEndpoint = "tcp://127.0.0.1:6000";
 
-    Client client(endpoint);
+    Client client(gatewayEndpoint);
 
     int counter = 0;
 
     while (running) {
-        std::string msg = "hello " + std::to_string(counter++);
-        client.send(msg);
-        std::cout << "[Client] Sent: " << msg << std::endl;
-
-        std::string reply;
-        if (client.recv(reply)) {
-            std::cout << "[Client] Received: " << reply << std::endl;
-        } else {
-            std::cout << "[Client] Receive failed\n";
+        std::string msg = "hello-" + std::to_string(counter++);
+        // client.send(msg);
+        std::cout << "[Client] Publishing: " << msg << std::endl;
+        auto res = client.publish("greetings", msg);
+        if (!res) {
+            std::cout << "[Client] Publish failed\n";
             break;
         }
-
-        std::this_thread::sleep_for(std::chrono::seconds(1));
+        std::cout << "[Client] Published successfully\n";
+        std::this_thread::sleep_for(std::chrono::seconds(2));
     }
 
     client.close();
