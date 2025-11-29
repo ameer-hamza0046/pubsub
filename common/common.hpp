@@ -8,7 +8,9 @@ inline const std::string CMD_GET_LATEST_ID = "GET_LATEST_ID";
 inline const std::string CMD_GET_MESSAGE_BY_ID = "GET_MESSAGE_BY_ID";
 
 // Responses
-inline const std::string RESP_ACK = "ACK";
+inline const std::string RESP_ACK = "ACK";  // for publish confirmations
+inline const std::string RESP_ID = "ID";    // for latest message ID responses
+inline const std::string RESP_MSG = "MSG";  // for message retrieval responses
 inline const std::string RESP_ERR = "ERR";
 
 // Delimiter

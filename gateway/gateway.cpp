@@ -113,6 +113,29 @@ void Gateway::stop() {
     std::cout << "Gateway shutdown complete.\n";
 }
 
+std::string construct_reply(const std::string& msg) {
+    auto parsed = split(msg, DELIM);
+    if (parsed.empty()) {
+        return RESP_ERR + DELIM + "Empty message";
+    }
+    if (parsed[0] == CMD_PUBLISH) {
+        // Simulate processing publish
+        std::cout << "[Worker] Publishing to topic: " << parsed[1]
+                  << " Message: " << parsed[2] << "\n";
+        return RESP_ACK + DELIM + "Published";
+    } else if (parsed[0] == CMD_GET_LATEST_ID) {
+        // Simulate fetching latest message ID
+        int fake_id = 42;  // placeholder
+        return std::to_string(fake_id);
+    } else if (parsed[0] == CMD_GET_MESSAGE_BY_ID) {
+        // Simulate fetching message by ID
+        std::string fake_message = "This is a message with ID " + parsed[1];
+        return RESP_MSG + DELIM + fake_message;
+    } else {
+        return RESP_ERR + DELIM + "Unknown command";
+    }
+}
+
 void Gateway::workerRoutine(int id) {
     try {
         zmq::socket_t worker(ctx, ZMQ_REP);
@@ -141,7 +164,9 @@ void Gateway::workerRoutine(int id) {
             std::string msg(static_cast<char*>(req.data()), req.size());
             std::cout << "[Worker " << id << "] received: " << msg << "\n";
 
-            std::string reply = "serverHello from worker " + std::to_string(id);
+            // frame the reply
+            std::string reply = construct_reply(msg);
+
             worker.send(zmq::buffer(reply), zmq::send_flags::none);
         }
     } catch (const zmq::error_t& e) {

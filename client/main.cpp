@@ -24,10 +24,12 @@ int main() {
     int counter = 0;
 
     while (running) {
+        std::string topic = "greetings";
         std::string msg = "hello-" + std::to_string(counter++);
         // client.send(msg);
-        std::cout << "[Client] Publishing: " << msg << std::endl;
-        auto res = client.publish("greetings", msg);
+        std::cout << "[Client] Publishing message: " << msg
+                  << " to topic: " << topic << std::endl;
+        auto res = client.publish(topic, msg);
         if (!res) {
             std::cout << "[Client] Publish failed\n";
             break;
