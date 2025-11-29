@@ -10,23 +10,6 @@ Client::Client(const std::string& endpoint)
 
 Client::~Client() { close(); }
 
-bool Client::send(const std::string& msg) {
-    if (closed) return false;
-    socket.send(zmq::buffer(msg), zmq::send_flags::none);
-    return true;
-}
-
-bool Client::recv(std::string& replyOut) {
-    if (closed) return false;
-
-    zmq::message_t reply;
-    auto ok = socket.recv(reply, zmq::recv_flags::none);
-    if (!ok) return false;
-
-    replyOut.assign(static_cast<char*>(reply.data()), reply.size());
-    return true;
-}
-
 bool Client::publish(const std::string& topic, const std::string& msg) {
     if (closed) return false;
 
@@ -58,7 +41,9 @@ bool Client::get_latest_message_id(const std::string& topic,
     if (!ok) return false;
 
     std::string replyStr(static_cast<char*>(reply.data()), reply.size());
-    message_idOut = std::stoi(replyStr);
+    auto parsed = split(replyStr, DELIM);
+    if (parsed.size() < 2 or parsed[0] != RESP_ID) return false;
+    message_idOut = std::stoi(parsed[1]);
     return true;
 }
 
@@ -75,7 +60,11 @@ bool Client::get_message_by_id(const std::string& topic, int message_id,
     auto ok = socket.recv(reply, zmq::recv_flags::none);
     if (!ok) return false;
 
-    messageOut.assign(static_cast<char*>(reply.data()), reply.size());
+    auto replyStr = std::string(static_cast<char*>(reply.data()), reply.size());
+    auto parsed = split(replyStr, DELIM);
+    if (parsed.size() < 2 or parsed[0] != RESP_MSG) return false;
+
+    messageOut = parsed[1];
     return true;
 }
 

@@ -10,9 +10,6 @@ class Client {
     Client(const std::string& endpoint);
     ~Client();
 
-    bool send(const std::string& msg);
-    bool recv(std::string& reply);
-
     void close();
 
     bool publish(const std::string& topic, const std::string& msg);

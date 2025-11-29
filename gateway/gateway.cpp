@@ -126,7 +126,7 @@ std::string construct_reply(const std::string& msg) {
     } else if (parsed[0] == CMD_GET_LATEST_ID) {
         // Simulate fetching latest message ID
         int fake_id = 42;  // placeholder
-        return std::to_string(fake_id);
+        return RESP_ID + DELIM + std::to_string(fake_id);
     } else if (parsed[0] == CMD_GET_MESSAGE_BY_ID) {
         // Simulate fetching message by ID
         std::string fake_message = "This is a message with ID " + parsed[1];
