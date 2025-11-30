@@ -1,11 +1,10 @@
 #include <atomic>
+#include <broker.hpp>
+#include <common.hpp>
 #include <csignal>
 #include <iostream>
 #include <thread>
 #include <vector>
-
-#include <broker.hpp>
-#include <common.hpp>
 
 std::atomic<bool> g_running(true);
 
@@ -18,28 +17,43 @@ int main(int argc, char** argv) {
     std::signal(SIGINT, handler);
     std::signal(SIGTERM, handler);
 
-    // Default port if not provided
+    // 1. Broker Data Port (Default 7001)
     std::string bindPort = "tcp://127.0.0.1:7001";
-    
-    // Allow passing port as arg: ./broker tcp://*:7002
     if (argc > 1) {
-        bindPort = "tcp://127.0.0.1:" + std::string(argv[1]);
+        std::string arg = argv[1];
+        bindPort = "tcp://127.0.0.1:" + arg;
     }
 
+    // 2. Load Configs
     const std::string config_path = "config/broker.conf";
-    std::string heartBeatEndpoint;
-    if (!read_one_line(config_path, heartBeatEndpoint)) {
-        heartBeatEndpoint = "tcp://127.0.0.1:6001";
+    std::string gatewayHbEndpoint;
+
+    std::vector<std::string> lines;
+    if (!read_all_lines(config_path, lines)) {
+        std::cerr << "[MAIN] Could not read config file: " << config_path
+                  << ", using defaults.\n";
+    }
+    // Default Heartbeat (Gateway)
+    if (lines.size() >= 1) {
+        gatewayHbEndpoint = lines[0];
     }
 
-    Broker broker(bindPort, heartBeatEndpoint);
+    // 3. DB Node Address (Fixed for now, or could act as arg)
+    // The DB Node listens on 8000 (REP)
+    std::string dbNodeEndpoint =
+        lines.size() >= 2 ? lines[1] : "tcp://127.0.0.1:8000";
 
-    // Run in thread
-    std::thread broker_thread([&broker](){
-        broker.run();
-    });
+    std::cout << "--- Broker Configuration ---\n"
+              << "Listen Addr:   " << bindPort << "\n"
+              << "Gateway HB:    " << gatewayHbEndpoint << "\n"
+              << "DB Node:       " << dbNodeEndpoint << "\n"
+              << "----------------------------\n";
 
-    while(g_running) {
+    Broker broker(bindPort, gatewayHbEndpoint, dbNodeEndpoint);
+
+    std::thread broker_thread([&broker]() { broker.run(); });
+
+    while (g_running) {
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
 

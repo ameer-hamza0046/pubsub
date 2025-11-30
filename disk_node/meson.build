@@ -1,9 +1,8 @@
-executable('broker',
-  ['main.cpp', 'broker.cpp'],
+executable('disk_node',
+  ['main.cpp', 'disk_node.cpp'],
   include_directories : [
     include_directories('.'),
-    common_inc,
-    util_inc
+    common_inc
   ],
   dependencies : [zmq]
 )

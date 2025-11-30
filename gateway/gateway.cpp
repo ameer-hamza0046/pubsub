@@ -164,6 +164,16 @@ void Gateway::run() {
                 } else {
                     // All brokers down
                     std::cerr << "[Gateway] Drop: No active brokers.\n";
+                    // send err to client
+                    std::vector<zmq::message_t> err_parts;
+                    err_parts.push_back(
+                        std::move(request_parts[0]));       // client addr
+                    err_parts.push_back(zmq::message_t());  // empty frame
+                    std::string err_msg =
+                        RESP_ERR + DELIM + "No active brokers";
+                    err_parts.push_back(
+                        zmq::message_t(err_msg.data(), err_msg.size()));
+                    send_multipart(frontend, err_parts);
                 }
             }
         }

@@ -4,6 +4,8 @@ cpp = meson.get_compiler('cpp')
 zmq = dependency('libzmq')
 
 subdir('common')
+subdir('utils')
 subdir('client')
 subdir('gateway')
 subdir('broker')
+subdir('disk_node')
