@@ -4,13 +4,15 @@
 #include <map>
 #include <string>
 #include <vector>
+#include <thread>
 #include <zmq.hpp>
 
-#include "../../common/common.hpp"
+#include <common.hpp>
 
 class Broker {
    public:
-    Broker(const std::string& bindAddr);
+    // Updated constructor to accept Gateway Heartbeat Address
+    Broker(const std::string& bindAddr, const std::string& gatewayHbAddr);
     ~Broker();
 
     void run();
@@ -21,6 +23,10 @@ class Broker {
     zmq::socket_t socket; // ROUTER
     std::string bindAddr;
     std::atomic<bool> stopRequested{false};
+
+    // Heartbeat Thread
+    std::thread heartbeat_thread;
+    void heartbeat_routine(std::string gatewayHbAddr, std::string myAddr);
 
     // In-memory storage: Topic -> List of Messages
     std::map<std::string, std::vector<std::string>> storage;

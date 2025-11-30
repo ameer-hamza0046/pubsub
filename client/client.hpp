@@ -3,7 +3,7 @@
 #include <string>
 #include <zmq.hpp>
 
-#include "../../common/common.hpp"
+#include <common.hpp>
 
 class Client {
    public:

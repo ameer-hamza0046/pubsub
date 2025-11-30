@@ -1,6 +1,7 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <client.hpp>
 #include <csignal>
 #include <iostream>
 #include <map>
@@ -8,8 +9,6 @@
 #include <sstream>
 #include <thread>
 #include <vector>
-
-#include "client.hpp"
 
 // --- GLOBALS & SYNCHRONIZATION ---
 

@@ -1,10 +1,9 @@
 #include <atomic>
+#include <common.hpp>
 #include <csignal>
+#include <gateway.hpp>
 #include <iostream>
 #include <thread>
-
-#include "../../common/common.hpp"
-#include "gateway.hpp"
 
 std::atomic<bool> g_running(true);
 
@@ -20,7 +19,7 @@ int main() {
     const std::string config_file = "config/gateway.conf";
 
     std::vector<std::string> lines;
-    if (!read_all_lines(config_file, lines) or lines.size() < 2) {
+    if (!read_all_lines(config_file, lines) or lines.size() < 3) {
         std::cerr << "[MAIN] Warning: could not read config file: "
                   << config_file << "\n";
         return 1;
@@ -29,9 +28,10 @@ int main() {
     // listenAddr: where clients connect
     // brokerAddr: where the dedicated broker process is listening
     auto const listenAddr = lines[0];
-    lines.erase(lines.begin());
+    auto const heartBeatPort = stoi(lines[1]);
+    lines.erase(lines.begin(), lines.begin() + 2); // Remove first two lines
 
-    Gateway gw(listenAddr, lines);
+    Gateway gw(listenAddr, lines, heartBeatPort);
 
     // Run in a thread or main loop
     std::thread gw_thread([&gw]() { gw.run(); });

@@ -1,16 +1,49 @@
-#include "broker.hpp"
-
+#include <broker.hpp>
+#include <chrono>
 #include <iostream>
 
-Broker::Broker(const std::string& bindAddr)
+Broker::Broker(const std::string& bindAddr, const std::string& gatewayHbAddr)
     : ctx(1), socket(ctx, ZMQ_ROUTER), bindAddr(bindAddr) {
-    std::cout << "[Broker] Binding to " << bindAddr << "\n";
+    std::cout << "[Broker] Binding data to " << bindAddr << "\n";
     socket.bind(bindAddr);
+
+    // Start the heartbeat thread immediately
+    // We pass 'bindAddr' so the Gateway knows exactly WHO is sending the beat
+    heartbeat_thread =
+        std::thread(&Broker::heartbeat_routine, this, gatewayHbAddr, bindAddr);
 }
 
 Broker::~Broker() { close(); }
 
-void Broker::close() { stopRequested = true; }
+void Broker::close() {
+    stopRequested = true;
+    if (heartbeat_thread.joinable()) heartbeat_thread.join();
+}
+
+// --- NEW: Heartbeat Routine ---
+void Broker::heartbeat_routine(std::string gatewayHbAddr, std::string myAddr) {
+    // We use a separate context/socket for this thread for safety
+    zmq::context_t hb_ctx(1);
+    zmq::socket_t hb_sock(hb_ctx, ZMQ_PUSH);
+
+    try {
+        // Connect to the Gateway's PULL port
+        hb_sock.connect(gatewayHbAddr);
+
+        while (!stopRequested) {
+            // Send our identity (myAddr) to say "I am alive"
+            zmq::message_t msg(myAddr.data(), myAddr.size());
+
+            // Send is usually non-blocking for PUSH unless pipe is full
+            hb_sock.send(msg, zmq::send_flags::dontwait);
+
+            // Sleep 1 second
+            std::this_thread::sleep_for(std::chrono::seconds(1));
+        }
+    } catch (const std::exception& e) {
+        std::cerr << "[Broker HB] Error: " << e.what() << "\n";
+    }
+}
 
 void Broker::run() {
     std::cout << "[Broker] Running. Waiting for requests...\n";

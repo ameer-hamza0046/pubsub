@@ -64,5 +64,7 @@
         "typeinfo": "cpp",
         "variant": "cpp",
         "fstream": "cpp"
-    }
+    },
+    "C_Cpp.default.compileCommands": "/home/ameer-hamza/Desktop/pub-sub/builddir/compile_commands.json",
+    "C_Cpp.default.configurationProvider": "mesonbuild.mesonbuild"
 }
