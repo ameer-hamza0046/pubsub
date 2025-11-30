@@ -160,6 +160,12 @@ void Gateway::run() {
                 int idx = choose_backend_index(request_parts);
 
                 if (idx != -1) {
+                    {
+                        std::lock_guard<std::mutex> lock(registry_mutex);
+                        std::cout << "[Gateway] Forwarding request to broker "
+                                  << idx << " (" << node_states[idx].address
+                                  << ")\n";
+                    }
                     send_multipart(backends[idx], request_parts);
                 } else {
                     // All brokers down

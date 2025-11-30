@@ -82,6 +82,7 @@ void Broker::run() {
 // Helper to talk to DB Node (Blocking for simplicity)
 std::string Broker::query_db(const std::string& requestStr) {
     try {
+        std::cout << "[Broker] Querying DB: " << requestStr << "\n";
         zmq::message_t req(requestStr.data(), requestStr.size());
         db_socket.send(req, zmq::send_flags::none);
 

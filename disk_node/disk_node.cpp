@@ -55,6 +55,7 @@ int SimpleDB::insert(const std::string& topic, const std::string& msg) {
     if (db_writer.is_open()) {
         db_writer << topic << DELIM << next_id << DELIM << msg << "\n";
         db_writer.flush();
+        std::cout << "[DB] Inserted '" << topic << "' id=" << next_id << "\n";
     }
     return next_id;
 }
