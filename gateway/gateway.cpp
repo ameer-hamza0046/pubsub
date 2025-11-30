@@ -1,180 +1,148 @@
 #include "gateway.hpp"
 
-#include <chrono>
+#include <functional>  // for std::hash
 #include <iostream>
 
-Gateway::Gateway(const std::string& bindAddress, int numWorkers)
+#include "../../common/common.hpp"
+
+Gateway::Gateway(const std::string& listenAddr,
+                 const std::vector<std::string>& brokers)
     : ctx(1),
       frontend(ctx, ZMQ_ROUTER),
-      backend(ctx, ZMQ_DEALER),
-      control(ctx, ZMQ_REP),
-      bindAddress(bindAddress) {
-    // Avoid hangs on close
-    frontend.set(zmq::sockopt::linger, 0);
-    backend.set(zmq::sockopt::linger, 0);
-    control.set(zmq::sockopt::linger, 0);
+      listenAddr(listenAddr),
+      brokerAddrs(brokers) {
+    // 1. Setup Frontend
+    std::cout << "[Gateway] Binding frontend to " << listenAddr << "\n";
+    frontend.bind(listenAddr);
 
-    // Bind internal and external endpoints
-    backend.bind("inproc://workers");
-    control.bind("inproc://proxy-control");
-    frontend.bind(bindAddress);
+    // 2. Setup Backends
+    // We reserve space to prevent vector resizing from moving sockets (which is
+    // expensive/tricky)
+    backends.reserve(brokers.size());
 
-    // Spawn worker threads
-    for (int i = 0; i < numWorkers; ++i) {
-        workers.emplace_back(&Gateway::workerRoutine, this, i);
-    }
-
-    std::cout << "Gateway initialized at " << bindAddress << " with "
-              << numWorkers << " workers.\n";
-}
-
-Gateway::~Gateway() { stop(); }
-
-void Gateway::start() {
-    if (running.exchange(true)) {
-        return;  // already running
-    }
-
-    std::cout << "Starting proxy thread...\n";
-    proxyThread = std::thread(&Gateway::proxyLoop, this);
-}
-
-void Gateway::proxyLoop() {
-    std::cout << "[PROXY] Entering zmq::proxy_steerable...\n";
-    try {
-        zmq::proxy_steerable(frontend, backend,
-                             zmq::socket_ref(),  // no capture socket
-                             control             // REP control socket
-        );
-    } catch (const zmq::error_t& e) {
-        // On shutdown, closing sockets can cause an error; we only log if not
-        // shutting down
-        if (running) {
-            std::cout << "[PROXY] unexpected error: " << e.what() << "\n";
-        }
-    }
-    std::cout << "[PROXY] zmq::proxy_steerable returned.\n";
-}
-
-void Gateway::stop() {
-    if (!running.exchange(false)) {
-        return;  // already stopped
-    }
-
-    std::cout << "Stopping gateway...\n";
-
-    // 1) Send TERMINATE to proxy and wait for reply (REQ–REP handshake)
-    try {
-        zmq::socket_t terminator(ctx, ZMQ_REQ);
-        terminator.set(zmq::sockopt::linger, 0);
-        terminator.connect("inproc://proxy-control");
-
-        std::cout << "[Shutdown] Sending TERMINATE...\n";
-        terminator.send(zmq::buffer("TERMINATE"), zmq::send_flags::none);
-
-        zmq::message_t reply;
-        auto res = terminator.recv(reply, zmq::recv_flags::none);
-        if (res) {
-            std::cout << "[Shutdown] Proxy acknowledged TERMINATE.\n";
-        } else {
-            std::cout << "[Shutdown] No reply from proxy.\n";
-        }
-
-        // For older libzmq versions, TERMINATE alone may not break proxy;
-        // closing frontend forces proxy_steerable to exit.
-        std::cout << "[Shutdown] Closing frontend to force proxy exit (if "
-                     "needed)...\n";
-        frontend.close();
-    } catch (const zmq::error_t& e) {
-        std::cout << "[Shutdown] Error during TERMINATE: " << e.what() << "\n";
-    }
-
-    // 2) Join proxy thread
-    std::cout << "[Shutdown] Joining proxy thread...\n";
-    if (proxyThread.joinable()) {
-        proxyThread.join();
-    }
-
-    // 3) Workers: we do NOT rely on backend.close() to wake them.
-    // They use RCVTIMEO and running=false to exit.
-    std::cout << "[Shutdown] Joining worker threads...\n";
-    for (auto& t : workers) {
-        if (t.joinable()) {
-            t.join();
-        }
-    }
-
-    // 4) Close remaining sockets and context
-    std::cout << "[Shutdown] Closing backend, control, and context...\n";
-    backend.close();
-    control.close();
-    ctx.close();
-
-    std::cout << "Gateway shutdown complete.\n";
-}
-
-std::string construct_reply(const std::string& msg) {
-    auto parsed = split(msg, DELIM);
-    if (parsed.empty()) {
-        return RESP_ERR + DELIM + "Empty message";
-    }
-    if (parsed[0] == CMD_PUBLISH) {
-        // Simulate processing publish
-        std::cout << "[Worker] Publishing to topic: " << parsed[1]
-                  << " Message: " << parsed[2] << "\n";
-        return RESP_ACK + DELIM + "Published";
-    } else if (parsed[0] == CMD_GET_LATEST_ID) {
-        // Simulate fetching latest message ID
-        int fake_id = 42;  // placeholder
-        return RESP_ID + DELIM + std::to_string(fake_id);
-    } else if (parsed[0] == CMD_GET_MESSAGE_BY_ID) {
-        // Simulate fetching message by ID
-        std::string fake_message = "This is a message with ID " + parsed[1];
-        return RESP_MSG + DELIM + fake_message;
-    } else {
-        return RESP_ERR + DELIM + "Unknown command";
+    for (const auto& addr : brokers) {
+        std::cout << "[Gateway] Connecting backend to " << addr << "\n";
+        // Create socket in place
+        backends.emplace_back(ctx, ZMQ_DEALER);
+        // Connect the last created socket
+        backends.back().connect(addr);
     }
 }
 
-void Gateway::workerRoutine(int id) {
-    try {
-        zmq::socket_t worker(ctx, ZMQ_REP);
-        worker.set(zmq::sockopt::linger, 0);
+Gateway::~Gateway() { close(); }
 
-        // KEY: Give recv a timeout so we can check `running` periodically
-        worker.set(zmq::sockopt::rcvtimeo, 200);  // 200 ms
+void Gateway::close() { stopRequested = true; }
 
-        worker.connect("inproc://workers");
+size_t Gateway::choose_backend_index(const std::vector<zmq::message_t>& parts) {
+    // Structure of a ROUTER message:
+    // [0] = Client Identity
+    // [1] = Empty Frame (usually, if using REQ client)
+    // [2] = Topic / Command / Data
 
-        while (true) {
-            zmq::message_t req;
-            auto res = worker.recv(req, zmq::recv_flags::none);
+    if (parts.size() < 3) return 0;  // Fallback
 
-            if (!res) {
-                // Timeout or interruption.
-                if (!running) {
-                    std::cout << "[Worker " << id
-                              << "] Shutdown detected, exiting.\n";
-                    break;
-                }
-                // Otherwise, just continue waiting.
-                continue;
+    // Let's interpret the 3rd frame (index 2) as the "Key" for routing
+    const auto& payload_frame = parts[2];
+    std::string key(static_cast<const char*>(payload_frame.data()),
+                    payload_frame.size());
+
+    auto parsed = split(key, DELIM);
+    // parsed[0] is CMD
+    // parsed[1] is TOPIC
+    key = parsed[1];
+
+    // EXAMPLE: Hash based routing
+    // If key is "UserA", it might go to broker 0. "UserB" to broker 1.
+    size_t hash = std::hash<std::string>{}(key);
+
+    // Modulo arithmetic to pick a valid index
+    return hash % backends.size();
+}
+
+void Gateway::run() {
+    // We need a poll item for the frontend + one for each backend
+    std::vector<zmq::pollitem_t> items;
+
+    // Item 0: Frontend
+    items.push_back({static_cast<void*>(frontend), 0, ZMQ_POLLIN, 0});
+
+    // Items 1..N: Backends
+    for (auto& backend_sock : backends) {
+        items.push_back({static_cast<void*>(backend_sock), 0, ZMQ_POLLIN, 0});
+    }
+
+    std::cout << "[Gateway] Loop started. Listening...\n";
+
+    while (!stopRequested) {
+        // Poll with 100ms timeout so we can check stopRequested flag
+        zmq::poll(items.data(), items.size(), std::chrono::milliseconds(100));
+
+        // ---------------------------------------------------------
+        // 1. CHECK FRONTEND (Client Requests)
+        // ---------------------------------------------------------
+        if (items[0].revents & ZMQ_POLLIN) {
+            std::vector<zmq::message_t> request_parts;
+            if (receive_multipart(frontend, request_parts)) {
+                // Pick a broker based on the message content
+                size_t broker_idx = choose_backend_index(request_parts);
+
+                // Forward the ENTIRE message (Identity included) to the chosen
+                // broker The Broker will see: [ClientID] [Empty] [Data]
+                send_multipart(backends[broker_idx], request_parts);
             }
-
-            std::string msg(static_cast<char*>(req.data()), req.size());
-            std::cout << "[Worker " << id << "] received: " << msg << "\n";
-
-            // frame the reply
-            std::string reply = construct_reply(msg);
-
-            worker.send(zmq::buffer(reply), zmq::send_flags::none);
         }
-    } catch (const zmq::error_t& e) {
-        if (e.num() != ETERM) {
-            std::cerr << "[Worker " << id << "] ZMQ error: " << e.what()
-                      << "\n";
-        } else {
-            std::cout << "[Worker " << id << "] Context terminating.\n";
+
+        // ---------------------------------------------------------
+        // 2. CHECK BACKENDS (Broker Replies)
+        // ---------------------------------------------------------
+        // We iterate from index 1 because index 0 is the frontend
+        for (size_t i = 0; i < backends.size(); ++i) {
+            if (items[i + 1].revents & ZMQ_POLLIN) {
+                std::vector<zmq::message_t> reply_parts;
+
+                // Read from the specific backend
+                if (receive_multipart(backends[i], reply_parts)) {
+                    // Route back to client.
+                    // The reply from Broker will be: [ClientID] [Empty]
+                    // [ReplyData] The Frontend (ROUTER) looks at the first
+                    // frame (ClientID) and knows exactly which TCP connection
+                    // to write to.
+                    send_multipart(frontend, reply_parts);
+                }
+            }
         }
     }
+    std::cout << "[Gateway] Loop stopped.\n";
+}
+
+// ---------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------
+
+bool Gateway::receive_multipart(zmq::socket_t& sock,
+                                std::vector<zmq::message_t>& out_parts) {
+    out_parts.clear();
+    while (true) {
+        zmq::message_t msg;
+        auto res = sock.recv(msg, zmq::recv_flags::none);
+        if (!res) return false;
+
+        out_parts.push_back(std::move(msg));
+
+        if (!sock.get(zmq::sockopt::rcvmore)) {
+            break;
+        }
+    }
+    return true;
+}
+
+bool Gateway::send_multipart(zmq::socket_t& sock,
+                             std::vector<zmq::message_t>& parts) {
+    for (size_t i = 0; i < parts.size(); ++i) {
+        // ZMQ_SNDMORE for all frames except the last one
+        auto flags = (i < parts.size() - 1) ? zmq::send_flags::sndmore
+                                            : zmq::send_flags::none;
+        sock.send(parts[i], flags);
+    }
+    return true;
 }
