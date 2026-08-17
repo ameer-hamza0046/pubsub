@@ -86,6 +86,8 @@ exit - Quit.
 ## Testing Fault Tolerance
 To verify the system handles failures:
 
+compiled
+
 1. Start all nodes (DB, Gateway, Brokers, Client).
 2. Run stress test 5000 in the Client.
 3. Kill Broker 1 (Ctrl+C).
